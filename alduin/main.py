@@ -1,13 +1,18 @@
 """Alduin - A minimal CLI coding agent."""
 
 import os
+import rich
 from typing import Any
 
 import anthropic
 import dotenv
 from rich.console import Console
 
-from alduin import theme, ui
+from alduin import llm, system_prompt, theme, ui
+
+# Tools
+from alduin.schema_converter import generate_tool_schema
+from alduin.tool import bash, edit_file, list_files, read_file
 
 
 def agent_loop(client: anthropic.Anthropic, console: Console) -> None:
@@ -20,6 +25,8 @@ def agent_loop(client: anthropic.Anthropic, console: Console) -> None:
 
     conversation: list[dict[str, Any]] = []
 
+    # tool_schemas = generate_tool_schema([read_file, edit_file, list_files, bash])
+
     while True:
         try:
             user_input = input("🧑‍💻 You: ").strip()
@@ -31,16 +38,36 @@ def agent_loop(client: anthropic.Anthropic, console: Console) -> None:
         if not user_input:
             continue
 
-        conversation.append({"role": "user", "content": user_input})
 
         ui.clear_previous_line()
         ui.print_user_message(console, user_input)
 
-        assistant_reply = (
-            "Krosis. That knowledge cannot be known to me. "
-            "Even the Firstborn of Akatosh has limits. Very few. But they exist."
+        # Add user input to conversation
+        conversation.append({"role": "user", "content": user_input})
+
+        # Get LLM response
+        assistant_reply = llm.call(
+          client=client, 
+          console=console, 
+          system_prompt=system_prompt.get(),
+          messages=conversation, 
+          tool_schemas=[]
         )
-        ui.print_assistant_reply(console=console, text=assistant_reply, input_tokens=0, output_tokens=0)
+
+        # Add response to the conversation
+        conversation.append({'role': 'assistant', 'content': assistant_reply.content})
+
+        # DEBUG
+        # rich.print(assistant_reply)
+
+        # Print response
+        for block in assistant_reply.content:
+            ui.print_assistant_reply(
+                    console=console, 
+                    text=block.text, 
+                    input_tokens=assistant_reply.usage.input_tokens, 
+                    output_tokens=assistant_reply.usage.output_tokens
+            )
 
 
 def main() -> None:
