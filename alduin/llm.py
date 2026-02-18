@@ -6,8 +6,8 @@ from rich.status import Status
 
 from alduin import ui
 
-MODEL = "claude-sonnet-4-5"
-MAX_TOKENS = 8096
+MODEL = "claude-sonnet-4-6"
+MAX_TOKENS = 8092
 
 
 def call(
