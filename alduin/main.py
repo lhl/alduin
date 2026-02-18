@@ -14,6 +14,67 @@ from alduin import llm, system_prompt, theme, ui
 from alduin.schema_converter import generate_tool_schema
 from alduin.tool import bash, edit_file, list_files, read_file
 
+TOOL_FUNCTIONS = {
+    'read_file': read_file,
+    'edit_file': edit_file,
+    'list_files': list_files,
+    'bash': bash,
+}
+
+def execute_tool(
+    *,
+    console: Console,
+    name: str,
+    request: Any,
+    definition: dict[str, Any],
+    conversation: list[dict[str, Any]] | None = None,
+) -> dict[str, Any]:
+    """Execute a tool call and record a tool_result message payload."""
+    _ = definition  # kept for compatibility with caller-provided tool metadata
+
+    args = getattr(request, "input", {})
+    if not isinstance(args, dict):
+        args = {}
+
+    ui.print_tool_request(console=console, name=name, args=args)
+
+    tool_fn = TOOL_FUNCTIONS.get(name)
+    if tool_fn is None:
+        error = f"Tool '{name}' is not available."
+        ui.print_tool_error(console=console, name=name, error=error)
+        result_block = {
+            "type": "tool_result",
+            "tool_use_id": getattr(request, "id", ""),
+            "is_error": True,
+            "content": error,
+        }
+    else:
+        try:
+            result = tool_fn(**args)
+        except Exception as exc:
+            error = f"{type(exc).__name__}: {exc}"
+            ui.print_tool_error(console=console, name=name, error=error)
+            result_block = {
+                "type": "tool_result",
+                "tool_use_id": getattr(request, "id", ""),
+                "is_error": True,
+                "content": error,
+            }
+        else:
+            text_result = result if isinstance(result, str) else str(result)
+            ui.print_tool_result(console=console, name=name, result=text_result)
+            result_block = {
+                "type": "tool_result",
+                "tool_use_id": getattr(request, "id", ""),
+                "content": text_result,
+            }
+
+    if conversation is not None:
+        conversation.append({"role": "user", "content": [result_block]})
+
+    return result_block
+
+
 def agent_loop(client: anthropic.Anthropic, console: Console) -> None:
     """Run the main agent loop: read input, call LLM, execute tools, repeat.
 
@@ -24,8 +85,8 @@ def agent_loop(client: anthropic.Anthropic, console: Console) -> None:
 
     conversation: list[dict[str, Any]] = []
 
-    # generate_tool_schema([read_file, edit_file, list_files, bash])
-    active_tools = generate_tool_schema([read_file])
+    active_tools = generate_tool_schema([read_file, edit_file, list_files, bash])
+    tools = {t['name']: t for t in active_tools}
 
     while True:
         try:
@@ -46,31 +107,41 @@ def agent_loop(client: anthropic.Anthropic, console: Console) -> None:
         conversation.append({"role": "user", "content": user_input})
 
         # Get LLM response
-        assistant_reply = llm.call(
-          client=client, 
-          console=console, 
-          system_prompt=system_prompt.get(),
-          messages=conversation, 
-          tool_schemas=active_tools
-        )
+        while True:
+            assistant_reply = llm.call(
+              client=client,
+              console=console,
+              system_prompt=system_prompt.get(),
+              messages=conversation,
+              tool_schemas=active_tools
+            )
 
-        # Add response to the conversation
-        conversation.append({'role': 'assistant', 'content': assistant_reply.content})
+            # Add response to the conversation
+            conversation.append({'role': 'assistant', 'content': assistant_reply.content})
 
-        # DEBUG
-        # rich.print(assistant_reply)
-
-        # Print response
-        for block in assistant_reply.content:
-            if block.type == 'text':
-                ui.print_assistant_reply(
-                        console=console, 
-                        text=block.text, 
-                        input_tokens=assistant_reply.usage.input_tokens, 
+            requires_tool_call = False
+            for block in assistant_reply.content:
+                if block.type == 'text':
+                    ui.print_assistant_reply(
+                        console=console,
+                        text=block.text,
+                        input_tokens=assistant_reply.usage.input_tokens,
                         output_tokens=assistant_reply.usage.output_tokens
-                )
-            else:
-                rich.print(block)
+                    )
+                else:
+                    requires_tool_call = True
+                    rich.print(block)
+
+                    execute_tool(
+                        console=console,
+                        name=block.name,
+                        request=block,
+                        definition=tools.get(block.name, {}),
+                        conversation=conversation
+                    )
+
+            if not requires_tool_call:
+                break
 
 
 def main() -> None:
