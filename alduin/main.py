@@ -14,7 +14,6 @@ from alduin import llm, system_prompt, theme, ui
 from alduin.schema_converter import generate_tool_schema
 from alduin.tool import bash, edit_file, list_files, read_file
 
-
 def agent_loop(client: anthropic.Anthropic, console: Console) -> None:
     """Run the main agent loop: read input, call LLM, execute tools, repeat.
 
@@ -25,7 +24,8 @@ def agent_loop(client: anthropic.Anthropic, console: Console) -> None:
 
     conversation: list[dict[str, Any]] = []
 
-    # tool_schemas = generate_tool_schema([read_file, edit_file, list_files, bash])
+    # generate_tool_schema([read_file, edit_file, list_files, bash])
+    active_tools = generate_tool_schema([read_file])
 
     while True:
         try:
@@ -51,7 +51,7 @@ def agent_loop(client: anthropic.Anthropic, console: Console) -> None:
           console=console, 
           system_prompt=system_prompt.get(),
           messages=conversation, 
-          tool_schemas=[]
+          tool_schemas=active_tools
         )
 
         # Add response to the conversation
@@ -62,12 +62,15 @@ def agent_loop(client: anthropic.Anthropic, console: Console) -> None:
 
         # Print response
         for block in assistant_reply.content:
-            ui.print_assistant_reply(
-                    console=console, 
-                    text=block.text, 
-                    input_tokens=assistant_reply.usage.input_tokens, 
-                    output_tokens=assistant_reply.usage.output_tokens
-            )
+            if block.type == 'text':
+                ui.print_assistant_reply(
+                        console=console, 
+                        text=block.text, 
+                        input_tokens=assistant_reply.usage.input_tokens, 
+                        output_tokens=assistant_reply.usage.output_tokens
+                )
+            else:
+                rich.print(block)
 
 
 def main() -> None:

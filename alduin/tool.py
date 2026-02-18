@@ -13,7 +13,13 @@ def read_file(path: str) -> str:
         The contents of the file, or an error message if it fails.
     """
 
-    pass
+    # Check if file exists
+    if os.path.exists(path):
+        with open(path, 'r') as f:
+            content = f.read()
+        return content
+    else:
+        return "We couldn't read the file, are you sure it exists?"
 
 
 def edit_file(path: str, old_str: str, new_str: str) -> str:
